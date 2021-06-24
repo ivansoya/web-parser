@@ -3,6 +3,7 @@ import requests
 import sys
 import os
 import threading
+import math
 from bs4 import BeautifulSoup
 
 class Date:
@@ -45,7 +46,7 @@ class Date:
 
     def get_days(self, other):
         temp_day = Date(self.get())
-        days = 0
+        days = 1
         if temp_day >= other:
             return -1
         while temp_day.get() != other.get():
@@ -79,7 +80,7 @@ class Date:
             if self.month > other.month:
                 return True
             if self.month == other.month:
-                if self.day < other.day:
+                if self.day <= other.day:
                     return False
                 else:
                     return True
@@ -127,7 +128,8 @@ class ParseThread(threading.Thread):
                     soup = BeautifulSoup(page.text, features="html.parser")
                     news = soup.find_all('h3')
                     news_list.extend(news)
-                    if len(news) == 27:
+                    paginator = re.sub("^\s+|\n|\t|\r|\s+$", '', str(soup.find('ul', {'class': 'paginator'})))
+                    if (len(news) == 27) and (paginator != "None"):
                         number += 1
                         page = "?page=" + str(number)
                         continue
@@ -143,17 +145,18 @@ class ParseThread(threading.Thread):
 # ---------------------- Функция вычисления делителей -------------------------
 
 def compute_divider(integer):
-    dividers = []
-    for i in range(1, integer + 1):
-        if integer % i == 0:
-            dividers.append(i)
-    if len(dividers) > 7:
-        return dividers[len(dividers) // 2 - len(dividers) // 4]
-    if len(dividers) > 0:
-        return dividers[len(dividers) // 2]
-    else:
+    if integer <= 0:
         return -1
-
+    if integer < 31:
+        return 1
+    if integer < 100:
+        return 3
+    if integer < 300:
+        return 10
+    if integer < 1000:
+        return 31
+    else:
+        return 50 * (integer // 1000)
 
 # ---------------------- Функция парсера ----------------------
 
@@ -167,23 +170,35 @@ def parse_new(href):
         except:
             continue
     soup = BeautifulSoup(request.text, features = "html.parser")
-    body = soup.find('article', {'class': 'post'})
+    entry = soup.find('div', {'class': 'head-post'})
+    entry_text = entry.find_all('div', {'class': None})
+    body = soup.find('div', {'class': 'entry-post'})
+    body_text = body.find_all('p', {'class': None})
     time = soup.find('span', {'class': 'time'})
-    name = body.find('h2', {'style': 'text-align: center'})
-    all_items = body.find_all(['p', 'h3', 'h4'], {'class': None})
-    items_p = []
-    for i in all_items:
-        if i.text not in items_p:
-            items_p.append(i.text)
+    name = entry.find('h2', {'style': 'text-align: center'})
+    items = []
+    for i in entry_text:
+        items.append(i.text)
+    #for i in body_text:
+    #    isExist = False
+    #    for j in items:
+    #        if j.find(i.text) != -1:
+    #            isExist = True
+    #            break
+    #    if isExist == False:
+    #        items.append(i.text)
+    for i in body_text:
+        items.append(i.text)
     texts = ""
-    for item in items_p:
+    for item in items:
         if item != '':
             text = re.sub("^\s+|\n|\t|\r|\s+$", '', item)
-            if text.endswith('.') == False:
-                text += '.'
-            texts += text
+            suffixes = ('.', '?', '!', ';', ',', '-', ':', '\"', '\'')
+            if text.endswith(suffixes) == False:
+                text += "."
+            texts += text + " "
     title = re.sub("^\s+|\n|\t|\r|\s+$", '', name.text)
-    time_text = re.sub("^\s+|\n|\t|\r|\s+$", '', time.get('title'))
+    time_text = re.sub("^\s+|\t|\r|\s+$", '', time.get('title'))
     row = title + '\t' + time_text + '\t' + href + '\t' + texts + '\n'
     return row
 
@@ -201,20 +216,24 @@ if days == -1:
 if date.check_correctness() == 1 or finish_date.check_correctness() == 1:
     print("Date is incorrect!")
     exit()
-divider = int(compute_divider(days))
-interval = days // divider
-print("%d threads was created" % (divider))
+divider = compute_divider(days)
+if divider == -1:
+    print("Unexpected error1")
+    exit()
+interval = math.ceil(days / divider)
+print("%d threads was created" % (interval))
 dates = []
 threads = []
-for i in range(divider):
+for i in range(interval):
     dates.append(date.get())
-    if i == divider - 1:
-        interval += 1
-    threads.append(ParseThread("Thread", i, date, interval))
-    date.increase_by_day(interval)
-for i in range(divider):
+    if i == interval - 1:
+        temp = Date(date.get())
+        divider = temp.get_days(finish_date)
+    threads.append(ParseThread("Thread", i, date, divider))
+    date.increase_by_day(divider)
+for i in range(interval):
     threads[i].start()
-for i in range(divider):
+for i in range(interval):
     threads[i].join()
 with open('result.tsv', 'w') as result_file:
     for item in dates:
